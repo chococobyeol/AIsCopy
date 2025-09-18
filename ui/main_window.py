@@ -5,7 +5,7 @@
 
 from PySide6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget,
                                QLabel, QPushButton, QMessageBox, QApplication, QDialog)
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import Qt, QTimer, Signal, QThread
 from PySide6.QtGui import QFont
 
 from utils.config_manager import ConfigManager
@@ -16,6 +16,26 @@ from core.image_processor import ImageProcessor
 from core.translation_engine import TranslationEngine
 from ui.overlay_windows import SourceWindow, OutputWindow
 from ui.settings_dialog import SettingsDialog
+
+class TranslationWorker(QThread):
+    """번역 작업을 위한 별도 스레드"""
+    translation_completed = Signal(str)
+    translation_failed = Signal(str)
+    
+    def __init__(self, translation_engine, image):
+        super().__init__()
+        self.translation_engine = translation_engine
+        self.image = image
+    
+    def run(self):
+        try:
+            translated_text = self.translation_engine.translate_image(self.image)
+            if translated_text:
+                self.translation_completed.emit(translated_text)
+            else:
+                self.translation_failed.emit("번역 결과가 없습니다.")
+        except Exception as e:
+            self.translation_failed.emit(f"번역 오류: {str(e)}")
 
 class MainWindow(QMainWindow):
     """메인 윈도우 클래스"""
@@ -51,6 +71,7 @@ class MainWindow(QMainWindow):
             # 상태
             self.is_running = False
             self.click_through_mode = False
+            self.translation_worker = None
             
             # 번역 엔진 초기화 시도
             self.initialize_translation_engine()
@@ -236,6 +257,17 @@ class MainWindow(QMainWindow):
         """설정 대화상자 열기"""
         logger.info("설정 대화상자 열기 요청 - Ctrl+, 단축키 감지됨")
         try:
+            # 번역 중지
+            if self.capture_timer.isActive():
+                self.capture_timer.stop()
+                logger.info("설정창 열기 - 번역 중지")
+            
+            # 번역 워커 중지
+            if self.translation_worker and self.translation_worker.isRunning():
+                self.translation_worker.terminate()
+                self.translation_worker.wait()
+                logger.info("설정창 열기 - 번역 워커 중지")
+            
             dialog = SettingsDialog(self.config_manager, self)
             dialog.settings_changed.connect(self.on_settings_changed)
             result = dialog.exec()
@@ -246,6 +278,12 @@ class MainWindow(QMainWindow):
                 self.show_main_interface()
             else:
                 logger.info("설정 취소됨")
+                # 설정 취소 시 번역 재시작
+                if self.is_running:
+                    config = self.config_manager.load_config()
+                    interval = config.get("translation", {}).get("capture_interval", 3) * 1000
+                    self.capture_timer.start(interval)
+                    logger.info("설정 취소 - 번역 재시작")
         except Exception as e:
             logger.error(f"설정 대화상자 오류: {e}")
             import traceback
@@ -268,6 +306,17 @@ class MainWindow(QMainWindow):
         self.hotkey_manager.stop_listening()
         self.hotkey_manager.clear_all_hotkeys()
         self.register_hotkeys()
+        
+        # 번역이 실행 중이었다면 재시작
+        if self.is_running:
+            # 기존 타이머 중지
+            if self.capture_timer.isActive():
+                self.capture_timer.stop()
+            
+            # 새로운 간격으로 타이머 재시작
+            interval = config.get("translation", {}).get("capture_interval", 3) * 1000
+            logger.info(f"설정 변경 후 번역 재시작 - 간격: {interval}ms")
+            self.capture_timer.start(interval)
     
     def start_translation(self):
         """번역 시작"""
@@ -286,7 +335,8 @@ class MainWindow(QMainWindow):
             # 캡처 타이머 시작
             config = self.config_manager.load_config()
             interval = config.get("translation", {}).get("capture_interval", 3) * 1000
-            logger.info(f"캡처 타이머 시작 - 간격: {interval}ms")
+            api_mode = config.get("ui", {}).get("api_call_mode", "manual")
+            logger.info(f"번역 시작 - 간격: {interval}ms, API 모드: {api_mode}")
             self.capture_timer.start(interval)
             
             self.is_running = True
@@ -413,6 +463,9 @@ class MainWindow(QMainWindow):
         config = self.config_manager.load_config()
         api_call_mode = config.get("ui", {}).get("api_call_mode", "manual")
         
+        logger.debug(f"API 호출 모드 확인: {api_call_mode}")
+        logger.debug(f"전체 설정: {config}")
+        
         if api_call_mode == "manual":
             logger.debug("수동 모드 - 자동 번역 건너뜀")
             return
@@ -437,11 +490,29 @@ class MainWindow(QMainWindow):
         if not self.image_processor.has_changed(image):
             return
         
-        # 번역 실행
+        # 비동기 번역 실행
         if self.translation_engine:
-            translated_text = self.translation_engine.translate_image(image)
-            if translated_text and self.output_window:
-                self.output_window.update_translation_result(translated_text)
+            self.start_translation_worker(image)
+    
+    def start_translation_worker(self, image):
+        """번역 워커 시작"""
+        if self.translation_worker and self.translation_worker.isRunning():
+            return  # 이미 번역 중이면 건너뛰기
+        
+        self.translation_worker = TranslationWorker(self.translation_engine, image)
+        self.translation_worker.translation_completed.connect(self.on_translation_completed)
+        self.translation_worker.translation_failed.connect(self.on_translation_failed)
+        self.translation_worker.start()
+    
+    def on_translation_completed(self, translated_text):
+        """번역 완료 처리"""
+        if self.output_window:
+            self.output_window.update_translation_result(translated_text)
+        logger.info(f"번역 완료: {translated_text}")
+    
+    def on_translation_failed(self, error_message):
+        """번역 실패 처리"""
+        logger.error(f"번역 실패: {error_message}")
     
     def toggle_click_through_mode(self):
         """클릭-스루 모드 토글"""
@@ -476,13 +547,8 @@ class MainWindow(QMainWindow):
                 return
             
             logger.info("수동 번역 - 이미지 캡처 성공, 번역 시작")
-            # 번역 실행
-            translated_text = self.translation_engine.translate_image(image)
-            if translated_text and self.output_window:
-                logger.info(f"수동 번역 완료: {translated_text}")
-                self.output_window.update_translation_result(translated_text)
-            else:
-                logger.warning("수동 번역 실패 - 번역 결과 없음")
+            # 비동기 번역 실행
+            self.start_translation_worker(image)
                 
         except Exception as e:
             logger.error(f"수동 번역 오류: {e}")
@@ -500,6 +566,14 @@ class MainWindow(QMainWindow):
         
         if self.screen_capture:
             self.screen_capture.close()
+        
+        # 번역 워커 중지
+        if self.translation_worker and self.translation_worker.isRunning():
+            self.translation_worker.terminate()
+            self.translation_worker.wait()
+        
+        # 창 위치 저장
+        self.save_window_positions()
         
         # 오버레이 창 닫기
         if self.source_window:

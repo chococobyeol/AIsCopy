@@ -99,24 +99,6 @@ class OverlayWindow(QWidget):
         
         layout.addStretch()
         
-        # 최소화 버튼
-        min_btn = QPushButton("−")
-        min_btn.setFixedSize(20, 20)
-        min_btn.setStyleSheet("""
-            QPushButton {
-                background-color: rgba(255, 255, 255, 100);
-                border: none;
-                border-radius: 10px;
-                color: white;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: rgba(255, 255, 255, 150);
-            }
-        """)
-        min_btn.clicked.connect(self.showMinimized)
-        layout.addWidget(min_btn)
-        
         title_bar.setLayout(layout)
         return title_bar
     
@@ -124,11 +106,11 @@ class OverlayWindow(QWidget):
         """내용 영역 생성"""
         content_area = QFrame()
         if self.window_type == "source":
-            # 번역 대상 창은 명확한 테두리
+            # 번역 대상 창은 명확한 테두리 (더 얇고 대비가 좋은 색상)
             content_area.setStyleSheet("""
                 QFrame {
                     background-color: transparent;
-                    border: 3px solid rgba(255, 255, 255, 255);
+                    border: 2px solid rgba(0, 150, 255, 200);
                     border-radius: 5px;
                 }
             """)
@@ -136,8 +118,8 @@ class OverlayWindow(QWidget):
             # 번역 출력 창은 반투명
             content_area.setStyleSheet("""
                 QFrame {
-                    background-color: rgba(0, 0, 0, 50);
-                    border: 2px dashed rgba(255, 255, 255, 100);
+                    background-color: rgba(0, 0, 0, 80);
+                    border: 1px solid rgba(100, 100, 100, 150);
                     border-radius: 5px;
                 }
             """)
@@ -152,10 +134,10 @@ class OverlayWindow(QWidget):
             self.source_label.setStyleSheet("color: white; font-size: 16px; font-weight: bold;")
             layout.addWidget(self.source_label)
         else:
-            # 번역 출력 창
+            # 번역 출력 창 - 텍스트 색상을 검은색으로 변경
             self.output_label = QLabel("번역 결과가 여기에 표시됩니다")
             self.output_label.setAlignment(Qt.AlignCenter)
-            self.output_label.setStyleSheet("color: white; font-size: 14px;")
+            self.output_label.setStyleSheet("color: black; font-size: 14px; font-weight: bold; background-color: rgba(255, 255, 255, 0.8); padding: 5px; border-radius: 3px;")
             self.output_label.setWordWrap(True)
             layout.addWidget(self.output_label)
         
@@ -195,12 +177,29 @@ class OverlayWindow(QWidget):
         if enabled:
             # 마우스 이벤트 무시
             self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-            # 더 투명하게
-            self.setStyleSheet("""
-                QWidget {
-                    background-color: rgba(0, 0, 0, 30);
-                }
-            """)
+            # 완전 투명하게 (테두리만 보이도록)
+            if self.window_type == "source":
+                self.setStyleSheet("""
+                    QWidget {
+                        background-color: transparent;
+                    }
+                    QFrame {
+                        background-color: transparent;
+                        border: 2px solid rgba(0, 150, 255, 150);
+                        border-radius: 5px;
+                    }
+                """)
+            else:
+                self.setStyleSheet("""
+                    QWidget {
+                        background-color: transparent;
+                    }
+                    QFrame {
+                        background-color: rgba(0, 0, 0, 30);
+                        border: 1px solid rgba(100, 100, 100, 100);
+                        border-radius: 5px;
+                    }
+                """)
         else:
             # 마우스 이벤트 활성화
             self.setAttribute(Qt.WA_TransparentForMouseEvents, False)
@@ -217,6 +216,8 @@ class OverlayWindow(QWidget):
         """번역 결과 업데이트 (출력 창만)"""
         if self.window_type == "output" and hasattr(self, 'output_label'):
             self.output_label.setText(text)
+            # 텍스트 색상 유지
+            self.output_label.setStyleSheet("color: black; font-size: 14px; font-weight: bold; background-color: rgba(255, 255, 255, 0.8); padding: 5px; border-radius: 3px;")
     
     def is_resize_area(self, pos):
         """크기 조절 영역인지 확인"""

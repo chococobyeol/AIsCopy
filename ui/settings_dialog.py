@@ -11,6 +11,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 from utils.config_manager import ConfigManager
 from core.translation_engine import TranslationEngine
+from utils.logger import logger
 
 class SettingsDialog(QDialog):
     """설정 대화상자"""
@@ -51,6 +52,10 @@ class SettingsDialog(QDialog):
         self.test_button = QPushButton("API 테스트")
         self.test_button.clicked.connect(self.test_api)
         button_layout.addWidget(self.test_button)
+        
+        self.reset_button = QPushButton("초기화")
+        self.reset_button.clicked.connect(self.reset_settings)
+        button_layout.addWidget(self.reset_button)
         
         self.apply_button = QPushButton("적용")
         self.apply_button.clicked.connect(self.apply_settings)
@@ -295,7 +300,9 @@ class SettingsDialog(QDialog):
     def apply_settings(self):
         """설정 적용"""
         self.save_settings()
-        self.settings_changed.emit(self.config_manager.load_config())
+        config = self.config_manager.load_config()
+        self.settings_changed.emit(config)
+        logger.info("설정 적용 완료")
     
     def accept_settings(self):
         """확인 버튼 클릭"""
@@ -331,3 +338,45 @@ class SettingsDialog(QDialog):
         
         # 설정 저장
         self.config_manager.save_config(config)
+    
+    def reset_settings(self):
+        """설정 초기화"""
+        reply = QMessageBox.question(self, "설정 초기화", 
+                                   "모든 설정을 기본값으로 초기화하시겠습니까?\n"
+                                   "이 작업은 되돌릴 수 없습니다.",
+                                   QMessageBox.Yes | QMessageBox.No)
+        
+        if reply == QMessageBox.Yes:
+            try:
+                # 설정 파일 삭제
+                self.config_manager.reset_config()
+                
+                # UI를 기본값으로 설정
+                self.load_default_settings()
+                
+                QMessageBox.information(self, "초기화 완료", 
+                                      "설정이 기본값으로 초기화되었습니다.\n"
+                                      "프로그램을 재시작하면 적용됩니다.")
+                
+            except Exception as e:
+                QMessageBox.critical(self, "초기화 오류", 
+                                   f"설정 초기화 중 오류가 발생했습니다:\n{str(e)}")
+    
+    def load_default_settings(self):
+        """기본 설정으로 UI 업데이트"""
+        # API 설정
+        self.api_key_edit.clear()
+        
+        # 번역 설정
+        self.target_language_combo.setCurrentIndex(0)  # 한국어
+        self.flash_radio.setChecked(True)
+        self.capture_interval_spin.setValue(3)
+        
+        # 창 설정
+        self.opacity_slider.setValue(80)
+        self.manual_mode_radio.setChecked(True)
+        
+        # 단축키 설정
+        self.click_through_hotkey_edit.setText("Ctrl+T")
+        self.translate_hotkey_edit.setText("Ctrl+Shift+T")
+        self.settings_hotkey_edit.setText("Ctrl+,")

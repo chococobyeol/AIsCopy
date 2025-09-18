@@ -17,7 +17,9 @@ def main():
     try:
         print("Starting AIsCopy...")
         from ui.main_window import MainWindow
-        from PySide6.QtWidgets import QApplication
+        from PySide6.QtWidgets import QApplication, QMessageBox
+        from utils.config_manager import ConfigManager
+        from core.translation_engine import TranslationEngine
         
         print("Creating QApplication...")
         # Create QApplication
@@ -25,6 +27,30 @@ def main():
         app.setApplicationName("AIsCopy")
         app.setApplicationVersion("1.0.0")
         app.setOrganizationName("AIsCopy")
+        
+        # API 키 검증
+        print("Validating API key...")
+        config_manager = ConfigManager()
+        config = config_manager.load_config()
+        api_key = config.get("api", {}).get("gemini_api_key", "")
+        
+        if not api_key:
+            QMessageBox.critical(None, "API 키 오류", 
+                               "API 키가 설정되지 않았습니다.\n설정에서 API 키를 입력해주세요.")
+            sys.exit(1)
+        
+        # API 키 유효성 검증
+        try:
+            translation_engine = TranslationEngine(api_key)
+            if not translation_engine.test_api_connection():
+                QMessageBox.critical(None, "API 연결 오류", 
+                                   "API 키가 유효하지 않습니다.\n올바른 API 키를 입력해주세요.")
+                sys.exit(1)
+            print("API key validation successful")
+        except Exception as e:
+            QMessageBox.critical(None, "API 연결 오류", 
+                               f"API 연결에 실패했습니다:\n{str(e)}")
+            sys.exit(1)
         
         print("Creating main window...")
         # Create and show main window
