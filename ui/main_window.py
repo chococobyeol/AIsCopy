@@ -109,9 +109,11 @@ class MainWindow(QMainWindow):
                 logger.info(f"번역 엔진 초기화 완료 - 언어: {target_lang}, 모델: {model}")
             else:
                 logger.warning("API 키가 설정되지 않음 - 번역 엔진 초기화 건너뜀")
+                self.translation_engine = None
                 
         except Exception as e:
             logger.error(f"번역 엔진 초기화 실패: {e}")
+            self.translation_engine = None
     
     def show_initial_setup(self):
         """초기 설정 화면 표시"""
@@ -223,6 +225,9 @@ class MainWindow(QMainWindow):
     
     def register_hotkeys(self):
         """단축키 등록"""
+        # 기존 단축키 클리어
+        self.hotkey_manager.clear_all_hotkeys()
+        
         config = self.config_manager.load_config()
         hotkeys = config.get("hotkeys", {})
         
@@ -268,14 +273,31 @@ class MainWindow(QMainWindow):
                 self.translation_worker.wait()
                 logger.info("설정창 열기 - 번역 워커 중지")
             
+            # 오버레이 창 숨기기
+            if self.source_window:
+                self.source_window.hide()
+                logger.info("설정창 열기 - 번역 대상 창 숨김")
+            if self.output_window:
+                self.output_window.hide()
+                logger.info("설정창 열기 - 번역 출력 창 숨김")
+            
             dialog = SettingsDialog(self.config_manager, self)
             dialog.settings_changed.connect(self.on_settings_changed)
             result = dialog.exec()
+            
+            # 설정 완료 후 오버레이 창 다시 보이기
+            if self.source_window:
+                self.source_window.show()
+                logger.info("설정창 닫기 - 번역 대상 창 다시 표시")
+            if self.output_window:
+                self.output_window.show()
+                logger.info("설정창 닫기 - 번역 출력 창 다시 표시")
             
             # 설정 완료 후 메인 인터페이스로 전환
             if result == QDialog.Accepted:
                 logger.info("설정 저장 완료 - 메인 인터페이스로 전환")
                 self.show_main_interface()
+                self.show()  # 메인 창 다시 보이기
             else:
                 logger.info("설정 취소됨")
                 # 설정 취소 시 번역 재시작
@@ -284,6 +306,7 @@ class MainWindow(QMainWindow):
                     interval = config.get("translation", {}).get("capture_interval", 3) * 1000
                     self.capture_timer.start(interval)
                     logger.info("설정 취소 - 번역 재시작")
+                self.show()  # 메인 창 다시 보이기
         except Exception as e:
             logger.error(f"설정 대화상자 오류: {e}")
             import traceback
@@ -294,13 +317,21 @@ class MainWindow(QMainWindow):
         # 번역 엔진 재초기화
         api_key = config.get("api", {}).get("gemini_api_key", "")
         if api_key:
-            self.translation_engine = TranslationEngine(api_key)
-            
-            target_lang = config.get("translation", {}).get("target_language", "ko")
-            self.translation_engine.set_target_language(target_lang)
-            
-            model = config.get("translation", {}).get("model", "gemini-2.5-flash")
-            self.translation_engine.set_model(model)
+            try:
+                self.translation_engine = TranslationEngine(api_key)
+                
+                target_lang = config.get("translation", {}).get("target_language", "ko")
+                self.translation_engine.set_target_language(target_lang)
+                
+                model = config.get("translation", {}).get("model", "gemini-2.5-flash")
+                self.translation_engine.set_model(model)
+                logger.info("설정 변경 후 번역 엔진 재초기화 완료")
+            except Exception as e:
+                logger.error(f"번역 엔진 재초기화 실패: {e}")
+                self.translation_engine = None
+        else:
+            logger.warning("API 키가 없음 - 번역 엔진을 None으로 설정")
+            self.translation_engine = None
         
         # 단축키 재등록
         self.hotkey_manager.stop_listening()
@@ -340,8 +371,8 @@ class MainWindow(QMainWindow):
             self.capture_timer.start(interval)
             
             self.is_running = True
-            logger.info("메인 창 최소화")
-            self.showMinimized()  # 메인 창 최소화 (숨기지 않음)
+            logger.info("메인 창 숨김")
+            self.hide()  # 메인 창 완전히 숨기기
             
             logger.info("번역 시작 완료")
             
@@ -359,26 +390,12 @@ class MainWindow(QMainWindow):
         # 번역 대상 창
         logger.info("번역 대상 창 생성 중...")
         self.source_window = SourceWindow()
-        source_config = config.get("windows", {}).get("source", {})
-        self.source_window.set_window_rect(
-            source_config.get("x", 100),
-            source_config.get("y", 100),
-            source_config.get("width", 300),
-            source_config.get("height", 200)
-        )
         self.source_window.show()
         logger.info("번역 대상 창 표시 완료")
         
         # 번역 출력 창
         logger.info("번역 출력 창 생성 중...")
         self.output_window = OutputWindow()
-        output_config = config.get("windows", {}).get("output", {})
-        self.output_window.set_window_rect(
-            output_config.get("x", 450),
-            output_config.get("y", 100),
-            output_config.get("width", 300),
-            output_config.get("height", 200)
-        )
         
         # 투명도 설정
         opacity = config.get("ui", {}).get("output_window_opacity", 0.8)
@@ -387,6 +404,9 @@ class MainWindow(QMainWindow):
         
         self.output_window.show()
         logger.info("번역 출력 창 표시 완료")
+        
+        # 창 위치 로드 (저장된 위치로 복원)
+        self.load_window_positions()
         
         # 창이 제대로 표시되는지 확인 및 강제 표시
         if not self.source_window.isVisible():
@@ -453,6 +473,44 @@ class MainWindow(QMainWindow):
         }
         
         self.config_manager.save_config(config)
+        logger.info("창 위치 저장 완료")
+    
+    def load_window_positions(self):
+        """창 위치 로드"""
+        config = self.config_manager.load_config()
+        
+        # 번역 대상 창 위치 로드
+        source_config = config.get("windows", {}).get("source", {})
+        if self.source_window:
+            self.source_window.set_window_rect(
+                source_config.get("x", 100),
+                source_config.get("y", 100),
+                source_config.get("width", 300),
+                source_config.get("height", 200)
+            )
+        
+        # 번역 출력 창 위치 로드
+        output_config = config.get("windows", {}).get("output", {})
+        if self.output_window:
+            self.output_window.set_window_rect(
+                output_config.get("x", 450),
+                output_config.get("y", 100),
+                output_config.get("width", 300),
+                output_config.get("height", 200)
+            )
+        
+        logger.info("창 위치 로드 완료")
+    
+    def _windows_overlap(self, rect1, rect2):
+        """두 사각형이 겹치는지 확인"""
+        if rect1 is None or rect2 is None:
+            return False
+        
+        x1, y1, w1, h1 = rect1
+        x2, y2, w2, h2 = rect2
+        
+        # 겹치는지 확인
+        return not (x1 + w1 < x2 or x2 + w2 < x1 or y1 + h1 < y2 or y2 + h2 < y1)
     
     def capture_and_translate(self):
         """화면 캡처 및 번역"""
@@ -471,17 +529,30 @@ class MainWindow(QMainWindow):
             return
         
         # 창이 드래그 중이거나 리사이즈 중이면 캡처 건너뛰기
-        if self.source_window.is_dragging:
+        if hasattr(self.source_window, '_drag_pos') and self.source_window._drag_pos is not None:
             logger.debug("창 드래그 중 - 캡처 건너뜀")
             return
-            
-        if self.source_window.is_resizing:
+        if hasattr(self.source_window, '_resizing') and self.source_window._resizing:
             logger.debug("창 리사이즈 중 - 캡처 건너뜀")
             return
         
-        # 번역 대상 영역 캡처
-        source_rect = self.source_window.get_window_rect()
+        # 번역 대상 영역 캡처 (내용 영역만, 제목 표시줄 제외)
+        source_rect = self.source_window.get_content_rect()
+        if source_rect is None:
+            logger.debug("번역 대상 영역이 없음 - 캡처 건너뜀")
+            return
+        
+        # 번역 출력창을 스크린샷에서 제외하기 위해 숨기기
+        if self.output_window:
+            self.output_window.hide()
+            logger.debug("번역 출력창 숨김 - 스크린샷에서 제외")
+        
         image = self.screen_capture.capture_window_region(source_rect)
+        
+        # 스크린샷 후 번역 출력창 다시 보이기
+        if self.output_window:
+            self.output_window.show()
+            logger.debug("번역 출력창 다시 표시")
         
         if image is None:
             return
@@ -490,6 +561,7 @@ class MainWindow(QMainWindow):
         if not self.image_processor.has_changed(image):
             return
         
+        logger.info("이미지 변화 감지됨, 번역 시작")
         # 비동기 번역 실행
         if self.translation_engine:
             self.start_translation_worker(image)
@@ -537,10 +609,21 @@ class MainWindow(QMainWindow):
                 logger.warning("수동 번역 실패 - 번역 엔진이 없음")
                 return
             
-            # 번역 대상 영역 캡처
-            source_rect = self.source_window.get_window_rect()
+            # 번역 대상 영역 캡처 (내용 영역만, 제목 표시줄 제외)
+            source_rect = self.source_window.get_content_rect()
             logger.debug(f"수동 번역 - 캡처 영역: {source_rect}")
+            
+            # 번역 출력창을 스크린샷에서 제외하기 위해 숨기기
+            if self.output_window:
+                self.output_window.hide()
+                logger.debug("수동 번역 - 번역 출력창 숨김")
+            
             image = self.screen_capture.capture_window_region(source_rect)
+            
+            # 스크린샷 후 번역 출력창 다시 보이기
+            if self.output_window:
+                self.output_window.show()
+                logger.debug("수동 번역 - 번역 출력창 다시 표시")
             
             if image is None:
                 logger.warning("수동 번역 실패 - 이미지 캡처 실패")

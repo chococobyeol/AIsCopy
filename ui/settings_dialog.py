@@ -243,6 +243,24 @@ class SettingsDialog(QDialog):
         api_key = config.get("api", {}).get("gemini_api_key", "")
         self.api_key_edit.setText(api_key)
         
+        # API 상태 업데이트
+        if api_key:
+            try:
+                from core.translation_engine import TranslationEngine
+                engine = TranslationEngine(api_key)
+                if engine.test_api_connection():
+                    self.api_status_label.setText("API 상태: 연결됨")
+                    self.api_status_label.setStyleSheet("color: green;")
+                else:
+                    self.api_status_label.setText("API 상태: 연결 실패")
+                    self.api_status_label.setStyleSheet("color: red;")
+            except:
+                self.api_status_label.setText("API 상태: 오류")
+                self.api_status_label.setStyleSheet("color: red;")
+        else:
+            self.api_status_label.setText("API 상태: 설정되지 않음")
+            self.api_status_label.setStyleSheet("color: orange;")
+        
         # 번역 설정
         target_lang = config.get("translation", {}).get("target_language", "ko")
         index = self.target_language_combo.findData(target_lang)
