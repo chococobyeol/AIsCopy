@@ -385,6 +385,17 @@ class MainWindow(QMainWindow):
     def create_overlay_windows(self):
         """오버레이 창 생성"""
         logger.info("오버레이 창 생성 시작")
+        
+        # 기존 창이 있으면 먼저 정리
+        if self.source_window:
+            logger.info("기존 번역 대상 창 정리")
+            self.source_window.close()
+            self.source_window = None
+        if self.output_window:
+            logger.info("기존 번역 출력 창 정리")
+            self.output_window.close()
+            self.output_window = None
+        
         config = self.config_manager.load_config()
         
         # 번역 대상 창
@@ -542,15 +553,21 @@ class MainWindow(QMainWindow):
             logger.debug("번역 대상 영역이 없음 - 캡처 건너뜀")
             return
         
-        # 번역 출력창을 스크린샷에서 제외하기 위해 숨기기
+        # 번역 출력창이 번역 대상 영역과 겹치는지 확인
+        output_rect = None
+        should_hide_output = False
         if self.output_window:
-            self.output_window.hide()
-            logger.debug("번역 출력창 숨김 - 스크린샷에서 제외")
+            output_rect = self.output_window.get_window_rect()
+            should_hide_output = self._windows_overlap(source_rect, output_rect)
+            
+            if should_hide_output:
+                self.output_window.hide()
+                logger.debug("번역 출력창이 대상 영역과 겹침 - 임시 숨김")
         
         image = self.screen_capture.capture_window_region(source_rect)
         
-        # 스크린샷 후 번역 출력창 다시 보이기
-        if self.output_window:
+        # 숨겼던 번역 출력창 다시 보이기
+        if should_hide_output and self.output_window:
             self.output_window.show()
             logger.debug("번역 출력창 다시 표시")
         
@@ -613,15 +630,21 @@ class MainWindow(QMainWindow):
             source_rect = self.source_window.get_content_rect()
             logger.debug(f"수동 번역 - 캡처 영역: {source_rect}")
             
-            # 번역 출력창을 스크린샷에서 제외하기 위해 숨기기
+            # 번역 출력창이 번역 대상 영역과 겹치는지 확인
+            output_rect = None
+            should_hide_output = False
             if self.output_window:
-                self.output_window.hide()
-                logger.debug("수동 번역 - 번역 출력창 숨김")
+                output_rect = self.output_window.get_window_rect()
+                should_hide_output = self._windows_overlap(source_rect, output_rect)
+                
+                if should_hide_output:
+                    self.output_window.hide()
+                    logger.debug("수동 번역 - 번역 출력창이 대상 영역과 겹침, 임시 숨김")
             
             image = self.screen_capture.capture_window_region(source_rect)
             
-            # 스크린샷 후 번역 출력창 다시 보이기
-            if self.output_window:
+            # 숨겼던 번역 출력창 다시 보이기
+            if should_hide_output and self.output_window:
                 self.output_window.show()
                 logger.debug("수동 번역 - 번역 출력창 다시 표시")
             
@@ -640,28 +663,77 @@ class MainWindow(QMainWindow):
     
     def closeEvent(self, event):
         """창 닫기 이벤트"""
-        # 리소스 정리
-        if self.capture_timer.isActive():
-            self.capture_timer.stop()
-        
-        if self.hotkey_manager:
-            self.hotkey_manager.stop_listening()
-        
-        if self.screen_capture:
-            self.screen_capture.close()
-        
-        # 번역 워커 중지
-        if self.translation_worker and self.translation_worker.isRunning():
-            self.translation_worker.terminate()
-            self.translation_worker.wait()
-        
-        # 창 위치 저장
-        self.save_window_positions()
-        
-        # 오버레이 창 닫기
-        if self.source_window:
-            self.source_window.close()
-        if self.output_window:
-            self.output_window.close()
+        logger.info("애플리케이션 종료 시작")
+        try:
+            # 번역 중지
+            self.is_running = False
+            
+            # 타이머 중지
+            if self.capture_timer and self.capture_timer.isActive():
+                self.capture_timer.stop()
+                logger.info("캡처 타이머 중지")
+            
+            # 번역 워커 안전하게 중지
+            if self.translation_worker and self.translation_worker.isRunning():
+                logger.info("번역 워커 종료 중...")
+                self.translation_worker.quit()  # 정상 종료 시도
+                if not self.translation_worker.wait(3000):  # 3초 대기
+                    logger.warning("번역 워커 강제 종료")
+                    self.translation_worker.terminate()
+                    self.translation_worker.wait()
+                logger.info("번역 워커 종료 완료")
+            
+            # 창 위치 저장 (오류 발생 시에도 계속 진행)
+            try:
+                self.save_window_positions()
+                logger.info("창 위치 저장 완료")
+            except Exception as e:
+                logger.error(f"창 위치 저장 실패: {e}")
+            
+            # 오버레이 창 닫기
+            if self.source_window:
+                try:
+                    self.source_window.close()
+                    self.source_window = None
+                    logger.info("번역 대상 창 닫기 완료")
+                except Exception as e:
+                    logger.error(f"번역 대상 창 닫기 실패: {e}")
+            
+            if self.output_window:
+                try:
+                    self.output_window.close()
+                    self.output_window = None
+                    logger.info("번역 출력 창 닫기 완료")
+                except Exception as e:
+                    logger.error(f"번역 출력 창 닫기 실패: {e}")
+            
+            # 단축키 리스너 중지
+            if self.hotkey_manager:
+                try:
+                    self.hotkey_manager.stop_listening()
+                    logger.info("단축키 리스너 중지 완료")
+                except Exception as e:
+                    logger.error(f"단축키 리스너 중지 실패: {e}")
+            
+            # 화면 캡처 리소스 정리
+            if self.screen_capture:
+                try:
+                    self.screen_capture.close()
+                    logger.info("화면 캡처 리소스 정리 완료")
+                except Exception as e:
+                    logger.error(f"화면 캡처 리소스 정리 실패: {e}")
+            
+            logger.info("애플리케이션 종료 완료")
+            
+        except Exception as e:
+            logger.error(f"애플리케이션 종료 중 오류: {e}")
+            import traceback
+            logger.error(f"상세 오류: {traceback.format_exc()}")
+        finally:
+            # QApplication 강제 종료
+            from PySide6.QtWidgets import QApplication
+            app = QApplication.instance()
+            if app:
+                app.quit()
         
         event.accept()

@@ -68,22 +68,11 @@ class OverlayWindow(QWidget):
     def setup_ui(self):
         """UI 구성"""
         layout = QVBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)  # 마진 제거
+        layout.setContentsMargins(0, 0, 0, 0)  # 여백 제거 - 원래대로
         
-        if self.window_type == "source":
-            # 번역 대상 창은 제목 표시줄과 내용 모두
-            self.title_bar = self.create_title_bar()
-            layout.addWidget(self.title_bar)
-            
-            content_area = self.create_content_area()
-            layout.addWidget(content_area)
-        else:
-            # 번역 출력 창은 제목 표시줄과 내용 모두
-            self.title_bar = self.create_title_bar()
-            layout.addWidget(self.title_bar)
-            
-            content_area = self.create_content_area()
-            layout.addWidget(content_area)
+        # 번역 대상창과 출력창 모두 제목 표시줄 없이 내용만 (크기 조절 문제 해결)
+        content_area = self.create_content_area()
+        layout.addWidget(content_area)
         
         self.setLayout(layout)
     
@@ -105,6 +94,8 @@ class OverlayWindow(QWidget):
         title_text = "번역 대상" if self.window_type == "source" else "번역 출력"
         title_label = QLabel(title_text)
         title_label.setStyleSheet("color: white; font-weight: bold;")
+        # 마우스 이벤트를 부모로 완전히 전달 (투명 처리)
+        title_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         layout.addWidget(title_label)
         
         layout.addStretch()
@@ -112,6 +103,7 @@ class OverlayWindow(QWidget):
         title_bar.setLayout(layout)
         
         # 제목 표시줄에서도 드래그 가능하도록 마우스 이벤트 전파
+        title_bar.setMouseTracking(True)  # 마우스 추적 활성화
         title_bar.mousePressEvent = self.mousePressEvent
         title_bar.mouseMoveEvent = self.mouseMoveEvent
         title_bar.mouseReleaseEvent = self.mouseReleaseEvent
@@ -123,48 +115,65 @@ class OverlayWindow(QWidget):
         content_area = QFrame()
         content_area.setObjectName("content_area")  # CSS 선택자를 위해 objectName 설정
         if self.window_type == "source":
-            # 번역 대상 창은 명확한 테두리 (더 얇고 대비가 좋은 색상)
+            # 번역 대상 창은 아주 약간 투명한 배경 (클릭 가능하게)
             content_area.setStyleSheet("""
                 QFrame {
-                    background-color: transparent;
+                    background-color: rgba(0, 0, 0, 5);
                     border: 2px solid rgba(0, 150, 255, 200);
                     border-radius: 5px;
                 }
             """)
         else:
-            # 번역 출력 창은 반투명
+            # 번역 출력 창은 반투명 흰색 배경
             content_area.setStyleSheet("""
                 QFrame {
-                    background-color: rgba(0, 0, 0, 80);
-                    border: 1px solid rgba(100, 100, 100, 150);
+                    background-color: rgba(255, 255, 255, 0.8);
+                    border: 2px solid rgba(150, 150, 150, 200);
                     border-radius: 5px;
                 }
             """)
         
         layout = QVBoxLayout()
-        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setContentsMargins(20, 20, 20, 20)  # 모든 방향 20px 여백으로 크기 조절 영역 확보
         
         if self.window_type == "source":
-            # 번역 대상 창 - 텍스트 제거 (번역 결과에 포함되지 않도록)
-            # self.source_label = QLabel("번역 대상 영역")
-            # self.source_label.setAlignment(Qt.AlignCenter)
-            # self.source_label.setStyleSheet("color: white; font-size: 16px; font-weight: bold;")
-            # layout.addWidget(self.source_label)
-            pass  # 들여쓰기 오류 방지
+            # 번역 대상 창 - 비어있음 (크기 조절 가능)
+            pass
         else:
-            # 번역 출력 창 - 텍스트 색상을 검은색으로 변경
-            self.output_label = QLabel("번역 결과가 여기에 표시됩니다")
+            # 번역 출력 창 - 대상창과 똑같이 비워둠 (크기 조절 가능)
+            # 번역 결과 표시용 라벨을 content_area 위에 오버레이로 추가
+            self.output_label = QLabel("번역 결과가 여기에 표시됩니다", content_area)
             self.output_label.setAlignment(Qt.AlignCenter)
-            self.output_label.setStyleSheet("color: black; font-size: 14px; font-weight: bold; background-color: rgba(255, 255, 255, 0.8); padding: 5px; border-radius: 3px;")
             self.output_label.setWordWrap(True)
-            layout.addWidget(self.output_label)
+            self.output_label.setStyleSheet("""
+                color: black; 
+                font-size: 14px; 
+                font-weight: bold; 
+                background-color: transparent;
+                padding: 20px;
+            """)
+            # 마우스 이벤트를 부모로 완전히 전달 (투명 처리)
+            self.output_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+            pass
         
         content_area.setLayout(layout)
         
         # 내용 영역에서도 드래그 가능하도록 마우스 이벤트 전파
+        content_area.setMouseTracking(True)  # 마우스 추적 활성화
         content_area.mousePressEvent = self.mousePressEvent
         content_area.mouseMoveEvent = self.mouseMoveEvent
         content_area.mouseReleaseEvent = self.mouseReleaseEvent
+        
+        # 번역 출력창인 경우 라벨 크기 조정
+        if self.window_type == "output" and hasattr(self, 'output_label'):
+            # content_area의 resizeEvent를 후킹해서 라벨 크기 조정
+            original_resize = content_area.resizeEvent
+            def content_area_resize_event(event):
+                original_resize(event)
+                self.output_label.resize(content_area.size())
+            content_area.resizeEvent = content_area_resize_event
+            # 초기 크기 설정
+            self.output_label.resize(content_area.size())
         
         return content_area
     
@@ -191,6 +200,9 @@ class OverlayWindow(QWidget):
             self.setStyleSheet("""
                 QWidget {
                     background-color: rgba(0, 0, 0, 80);
+                }
+                QFrame {
+                    background-color: transparent;
                 }
             """)
     
@@ -250,7 +262,7 @@ class OverlayWindow(QWidget):
         if self.window_type == "output" and hasattr(self, 'output_label'):
             self.output_label.setText(text)
             # 텍스트 색상 유지
-            self.output_label.setStyleSheet("color: black; font-size: 14px; font-weight: bold; background-color: rgba(255, 255, 255, 0.8); padding: 5px; border-radius: 3px;")
+            self.output_label.setStyleSheet("color: black; font-size: 14px; font-weight: bold; background-color: rgba(255, 255, 255, 0.8); padding: 10px; border-radius: 3px;")
     
     
     def mousePressEvent(self, event):
@@ -260,7 +272,7 @@ class OverlayWindow(QWidget):
             self._resize_direction = self._get_resize_direction(event.pos())
             self._resizing = self._resize_direction is not None
             
-            logger.debug(f"마우스 클릭: pos={event.pos()}, resize_direction={self._resize_direction}, resizing={self._resizing}")
+            # logger.debug(f"마우스 클릭: pos={event.pos()}, resize_direction={self._resize_direction}, resizing={self._resizing}")
             event.accept()
         elif event.button() == Qt.RightButton and not self.click_through_mode:
             # 오른쪽 클릭 메뉴
@@ -275,10 +287,12 @@ class OverlayWindow(QWidget):
         if not self.click_through_mode:
             if self._resizing and self._resize_direction:
                 self._resize_window(event.globalPosition().toPoint())
-            elif self._drag_pos:
+            elif self._drag_pos and not self._resizing:
                 self.move(event.globalPosition().toPoint() - self._drag_pos)
                 self.position_changed.emit(self.x(), self.y())
-            else:
+            
+            # 드래그나 리사이즈 중이 아닐 때만 커서 업데이트
+            if not self._resizing and not self._drag_pos:
                 self._update_cursor(event.pos())
             event.accept()
         else:
@@ -292,7 +306,7 @@ class OverlayWindow(QWidget):
             self._resizing = False
             self._resize_direction = None
             self.setCursor(Qt.ArrowCursor)
-            logger.debug("마우스 릴리즈")
+            # logger.debug("마우스 릴리즈")
             event.accept()
     
     def resizeEvent(self, event):
@@ -317,13 +331,15 @@ class OverlayWindow(QWidget):
         return (self.x(), self.y(), self.width(), self.height())
     
     def get_content_rect(self):
-        """내용 영역의 위치와 크기 반환 (제목 표시줄 제외)"""
+        """내용 영역의 위치와 크기 반환 (여백 제외)"""
         if self.window_type == "source":
-            # 제목 표시줄 높이(30px)를 제외한 내용 영역만
-            title_height = 30
-            content_y = self.y() + title_height
-            content_height = self.height() - title_height
-            return (self.x(), content_y, self.width(), content_height)
+            # 제목 표시줄이 없으므로 전체 창에서 여백(20px)만 제외
+            margin = 20
+            content_x = self.x() + margin
+            content_y = self.y() + margin  
+            content_width = self.width() - (margin * 2)
+            content_height = self.height() - (margin * 2)
+            return (content_x, content_y, content_width, content_height)
         else:
             # 출력 창은 번역 대상에 포함되지 않음
             return None
@@ -334,7 +350,7 @@ class OverlayWindow(QWidget):
         x, y = pos.x(), pos.y()
         w, h = rect.width(), rect.height()
         
-        logger.debug(f"크기 조절 감지: pos=({x}, {y}), size=({w}, {h}), border={self._border_width}")
+        # logger.debug(f"크기 조절 감지: pos=({x}, {y}), size=({w}, {h}), border={self._border_width}")
         
         # 꼭지점 감지 (우선순위) - 정확한 조건
         if x < self._border_width and y < self._border_width:
@@ -394,7 +410,7 @@ class OverlayWindow(QWidget):
     def _update_cursor(self, pos):
         """커서 모양 업데이트 (예제 코드 기반)"""
         direction = self._get_resize_direction(pos)
-        logger.debug(f"커서 업데이트: {direction} at {pos}")
+        # logger.debug(f"[{self.window_type}] 마우스 위치: ({pos.x()}, {pos.y()}) / 창크기: ({self.width()}, {self.height()}) / 감지방향: {direction}")
         
         if direction in ['top_left', 'bottom_right']:
             self.setCursor(Qt.SizeFDiagCursor)
